@@ -239,4 +239,3 @@ app.post('/api/request-payout', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Сервер Гойуслуг запущен на порту ${PORT}`);
-});
