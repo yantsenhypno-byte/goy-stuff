@@ -17,7 +17,24 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '/')));
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(BOT_TOKEN, { 
+  polling: {
+    autoStart: true,
+    params: {
+      timeout: 10
+    }
+  } 
+});
+
+// Глушим краш от конфликта параллельных сессий polling
+bot.on('polling_error', (error) => {
+  if (error.code === 'ETELEGRAM' && error.message.includes('409 Conflict')) {
+    console.error('Предупреждение: бот запущен где-то еще (409 Conflict). Остановите дублирующий процесс на ПК или старый деплой.');
+  } else {
+    console.error('Ошибка polling:', error.message);
+  }
+});
+
 const DB_FILE = path.join(__dirname, 'database.json');
 
 function loadDB() {
@@ -68,7 +85,9 @@ bot.onText(/\/start(?:\s+(.+))?/, (msg, match) => {
     saveDB(db);
   }
 
-  bot.sendMessage(chatId, `Добро пожаловать в ведомственный контур «Хуцпа».\n\nИспользуйте кнопку меню «Подать заявление» для запуска портала.`);
+  bot.sendMessage(chatId, 'Добро пожаловать в ведомственный контур «Хуцпа».\n\nИспользуйте кнопку меню «Подать заявление» для запуска портала.').catch((err) => {
+    console.error('Ошибка отправки сообщения:', err.message);
+  });
 });
 
 // 2. Логика начисления при входе в группу
@@ -101,14 +120,14 @@ bot.on('chat_member', (event) => {
         db.users[l1_id].balance_usd += 20;
         db.users[l1_id].referrals_l1 += 1;
 
-        bot.sendMessage(l1_id, `💰 Государственная выплата: Ваш реферал 1-го уровня оформил допуск!\nВам начислено: 20$\nТекущий баланс: ${db.users[l1_id].balance_usd}$`);
+        bot.sendMessage(l1_id, `💰 Государственная выплата: Ваш реферал 1-го уровня оформил допуск!\nВам начислено: 20$\nТекущий баланс: ${db.users[l1_id].balance_usd}$`).catch(() => {});
 
         const l2_id = db.users[l1_id].inviter_id;
         if (l2_id && db.users[l2_id]) {
           db.users[l2_id].balance_usd += 2;
           db.users[l2_id].referrals_l2 += 1;
 
-          bot.sendMessage(l2_id, `🏛 Федеральный процент: В вашей структуре 2-го уровня оформлен допуск!\nВам начислено: 2$\nТекущий баланс: ${db.users[l2_id].balance_usd}$`);
+          bot.sendMessage(l2_id, `🏛 Федеральный процент: В вашей структуре 2-го уровня оформлен допуск!\nВам начислено: 2$\nТекущий баланс: ${db.users[l2_id].balance_usd}$`).catch(() => {});
         }
       }
     }
@@ -117,7 +136,7 @@ bot.on('chat_member', (event) => {
   }
 });
 
-// 3. Автоматическая проверка членства через Telegram API
+// 3. Проверка членства через Telegram API
 app.get('/api/partner-info', async (req, res) => {
   const tgId = parseInt(req.query.tg_id, 10);
   if (!tgId) return res.status(400).json({ error: 'Missing tg_id' });
@@ -176,7 +195,6 @@ app.get('/api/partner-info', async (req, res) => {
       });
     }
   } catch (err) {
-    // Если бот получил ошибку (пользователя нет в группе или чат не найден)
     return res.json({
       access_granted: false,
       reason: 'Допуск в партнерский реестр закрыт. Доступен исключительно действительным резидентам закрытого контура «Хуцпа».'
@@ -214,7 +232,7 @@ app.post('/api/request-payout', (req, res) => {
                    `💳 Реквизиты: ${requisites}\n` +
                    `Остаток на балансе: ${user.balance_usd} $`;
 
-  bot.sendMessage(ADMIN_ID, adminMsg);
+  bot.sendMessage(ADMIN_ID, adminMsg).catch(() => {});
 
   res.json({ success: true, new_balance: user.balance_usd });
 });
