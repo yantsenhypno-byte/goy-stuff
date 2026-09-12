@@ -1,0 +1,183 @@
+const express = require('express');
+const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+const TelegramBot = require('node-telegram-bot-api');
+
+// ================= НАСТРОЙКИ =================
+const BOT_TOKEN = '8907145037:AAGXwsJTJcTOMxi0vXTCoL3qv0grqo_tlto';
+const ADMIN_ID = 1244809999; 
+// Исправлен двойной минус (строго отрицательное число супергруппы)
+const GROUP_ID = -1004215688536; 
+const BOT_USERNAME = 'Hucpa_buy_bot'; 
+const PORT = process.env.PORT || 3000;
+// ============================================
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, '/')));
+
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+const DB_FILE = path.join(__dirname, 'database.json');
+
+// Инициализация базы данных
+function loadDB() {
+  if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, JSON.stringify({ users: {} }, null, 2));
+  }
+  return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+}
+
+function saveDB(data) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+}
+
+// 1. Обработка команды /start и фиксация реферальных связей
+bot.onText(/\/start(?:\s+(.+))?/, (msg, match) => {
+  const chatId = msg.chat.id;
+  const tgId = msg.from.id;
+  const username = msg.from.username || msg.from.first_name || 'Неизвестный';
+  const startParam = match[1];
+
+  const db = loadDB();
+
+  if (!db.users[tgId]) {
+    let inviterId = null;
+
+    if (startParam && startParam.startsWith('ref_')) {
+      const parsedId = parseInt(startParam.replace('ref_', ''), 10);
+      if (parsedId && parsedId !== tgId && db.users[parsedId]) {
+        inviterId = parsedId;
+      }
+    }
+
+    db.users[tgId] = {
+      id: tgId,
+      username: username,
+      inviter_id: inviterId,
+      is_active: false,
+      balance_usd: 0,
+      referrals_l1: 0,
+      referrals_l2: 0,
+      payout_history: []
+    };
+
+    saveDB(db);
+  }
+
+  bot.sendMessage(chatId, `Добро пожаловать в ведомственный контур «Хуцпа».\n\nИспользуйте кнопку меню «Подать заявление» для запуска портала.`);
+});
+
+// 2. Логирование входа в супергруппу с темами (автоактивация и 2 уровня выплат)
+bot.on('chat_member', (event) => {
+  // Проверяем ID супергруппы (приводим к Number для надежности)
+  if (Number(event.chat.id) !== Number(GROUP_ID)) return;
+
+  const newStatus = event.new_chat_member.status;
+  const tgId = event.new_chat_member.user.id;
+  const db = loadDB();
+
+  // Отслеживаем статус нового участника (member, administrator, restricted с правом доступа)
+  if (['member', 'administrator'].includes(newStatus)) {
+    if (!db.users[tgId]) {
+      db.users[tgId] = {
+        id: tgId,
+        username: event.new_chat_member.user.username || 'Client',
+        inviter_id: null,
+        is_active: true,
+        balance_usd: 0,
+        referrals_l1: 0,
+        referrals_l2: 0,
+        payout_history: []
+      };
+    }
+
+    // Если участник активируется впервые
+    if (!db.users[tgId].is_active) {
+      db.users[tgId].is_active = true;
+
+      const l1_id = db.users[tgId].inviter_id;
+      if (l1_id && db.users[l1_id]) {
+        // Уровень 1: $20
+        db.users[l1_id].balance_usd += 20;
+        db.users[l1_id].referrals_l1 += 1;
+
+        bot.sendMessage(l1_id, `💰 Государственная выплата: Ваш реферал 1-го уровня оформил допуск!\nВам начислено: 20$\nТекущий баланс: ${db.users[l1_id].balance_usd}$`);
+
+        // Уровень 2: $2
+        const l2_id = db.users[l1_id].inviter_id;
+        if (l2_id && db.users[l2_id]) {
+          db.users[l2_id].balance_usd += 2;
+          db.users[l2_id].referrals_l2 += 1;
+
+          bot.sendMessage(l2_id, `🏛 Федеральный процент: В вашей структуре 2-го уровня оформлен допуск!\nВам начислено: 2$\nТекущий баланс: ${db.users[l2_id].balance_usd}$`);
+        }
+      }
+    }
+
+    saveDB(db);
+  }
+});
+
+// 3. API для фронтенда Гойуслуг
+app.get('/api/partner-info', (req, res) => {
+  const tgId = parseInt(req.query.tg_id, 10);
+  if (!tgId) return res.status(400).json({ error: 'Missing tg_id' });
+
+  const db = loadDB();
+  const user = db.users[tgId];
+
+  if (!user || !user.is_active) {
+    return res.json({
+      access_granted: false,
+      reason: 'Допуск в партнерский реестр выдается автоматически после подтверждения членства в сообществе.'
+    });
+  }
+
+  res.json({
+    access_granted: true,
+    ref_link: `https://t.me/${BOT_USERNAME}?start=ref_${tgId}`,
+    balance_usd: user.balance_usd,
+    referrals_l1: user.referrals_l1,
+    referrals_l2: user.referrals_l2
+  });
+});
+
+// 4. Запрос на вывод средств
+app.post('/api/request-payout', (req, res) => {
+  const { tg_id, amount, requisites } = req.body;
+  const db = loadDB();
+  const user = db.users[tg_id];
+
+  if (!user || !user.is_active) {
+    return res.status(403).json({ error: 'Доступ ограничен ведомством' });
+  }
+
+  if (user.balance_usd < amount || amount <= 0) {
+    return res.status(400).json({ error: 'Недостаточно средств на балансе реестра' });
+  }
+
+  user.balance_usd -= amount;
+  user.payout_history.push({
+    amount,
+    requisites,
+    date: new Date().toISOString()
+  });
+
+  saveDB(db);
+
+  const adminMsg = `🚨 ЗАЯВКА НА ВЫПЛАТУ АГЕНТУ!\n\n` +
+                   `👤 Агент: @${user.username} (ID: ${user.id})\n` +
+                   `💵 Сумма: ${amount} $\n` +
+                   `💳 Реквизиты: ${requisites}\n` +
+                   `Остаток на балансе: ${user.balance_usd} $`;
+
+  bot.sendMessage(ADMIN_ID, adminMsg);
+
+  res.json({ success: true, new_balance: user.balance_usd });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Сервер Гойуслуг запущен на порту ${PORT}`);
+});
