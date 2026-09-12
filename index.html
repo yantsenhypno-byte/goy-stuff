@@ -1371,7 +1371,9 @@
 
       var cards = document.querySelectorAll('.tariff-card');
       cards.forEach(function(card) { card.classList.remove('selected'); });
-      event.currentTarget.classList.add('selected');
+      if (window.event && window.event.currentTarget) {
+        window.event.currentTarget.classList.add('selected');
+      }
 
       if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
     }
@@ -1447,7 +1449,7 @@
         })
         .then(function(data) {
           console.log('Ответ от реестра:', data);
-          if (data.access_granted) {
+          if (data && data.access_granted) {
             document.getElementById('refLinkInput').value = data.ref_link;
             document.getElementById('refBalanceVal').innerText = (data.balance_usd || 0) + ' $';
             document.getElementById('refL1Val').innerText = (data.referrals_l1 || 0) + ' чел.';
@@ -1519,7 +1521,9 @@
       currentMethod = method;
       var cards = document.querySelectorAll('.method-card');
       cards.forEach(function(c) { c.classList.remove('selected'); });
-      event.currentTarget.classList.add('selected');
+      if (window.event && window.event.currentTarget) {
+        window.event.currentTarget.classList.add('selected');
+      }
 
       togglePayButtonState();
       if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
@@ -1637,4 +1641,3 @@
   </script>
 </body>
 </html>
-
