@@ -17,19 +17,31 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '/')));
 
+// Задержка поллинга для избежания конфликта с предыдущим контейнером Railway
 const bot = new TelegramBot(BOT_TOKEN, { 
   polling: {
-    autoStart: true,
+    autoStart: false,
     params: {
       timeout: 10
     }
   } 
 });
 
-// Глушим краш от конфликта параллельных сессий polling
+// Сбрасываем старые зависшие сессии и стартуем
+async function startBotEngine() {
+  try {
+    await bot.deleteWebHook({ drop_pending_updates: true });
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await bot.startPolling();
+    console.log('Бот успешно подключен к Telegram контуру');
+  } catch (err) {
+    console.error('Ошибка инициализации Telegram:', err.message);
+  }
+}
+
 bot.on('polling_error', (error) => {
   if (error.code === 'ETELEGRAM' && error.message.includes('409 Conflict')) {
-    console.error('Предупреждение: бот запущен где-то еще (409 Conflict). Остановите дублирующий процесс на ПК или старый деплой.');
+    // Тихо подавляем конфликт пересборки Railway
   } else {
     console.error('Ошибка polling:', error.message);
   }
@@ -85,9 +97,7 @@ bot.onText(/\/start(?:\s+(.+))?/, (msg, match) => {
     saveDB(db);
   }
 
-  bot.sendMessage(chatId, 'Добро пожаловать в ведомственный контур «Хуцпа».\n\nИспользуйте кнопку меню «Подать заявление» для запуска портала.').catch((err) => {
-    console.error('Ошибка отправки сообщения:', err.message);
-  });
+  bot.sendMessage(chatId, 'Добро пожаловать в ведомственный контур «Хуцпа».\n\nИспользуйте кнопку меню «Подать заявление» для запуска портала.').catch(() => {});
 });
 
 // 2. Логика начисления при входе в группу
@@ -136,7 +146,7 @@ bot.on('chat_member', (event) => {
   }
 });
 
-// 3. Проверка членства через Telegram API
+// 3. Проверка партнерского статуса
 app.get('/api/partner-info', async (req, res) => {
   const tgId = parseInt(req.query.tg_id, 10);
   if (!tgId) return res.status(400).json({ error: 'Missing tg_id' });
@@ -144,7 +154,6 @@ app.get('/api/partner-info', async (req, res) => {
   const db = loadDB();
   let user = db.users[tgId];
 
-  // Инициализируем в базе, если еще нет
   if (!user) {
     user = {
       id: tgId,
@@ -160,7 +169,6 @@ app.get('/api/partner-info', async (req, res) => {
     saveDB(db);
   }
 
-  // Админу доступ открыт всегда
   if (tgId === ADMIN_ID) {
     return res.json({
       access_granted: true,
@@ -171,7 +179,6 @@ app.get('/api/partner-info', async (req, res) => {
     });
   }
 
-  // Проверяем членство в группе через Telegram
   try {
     const member = await bot.getChatMember(GROUP_ID, tgId);
     const hasAccess = ['member', 'administrator', 'creator'].includes(member.status);
@@ -239,3 +246,5 @@ app.post('/api/request-payout', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Сервер Гойуслуг запущен на порту ${PORT}`);
+  startBotEngine();
+});
