@@ -1,7 +1,7 @@
 {
   "name": "goyuslugi-backend",
   "version": "1.0.0",
-  "description": "Backend для Гойуслуг и реферальной системы",
+  "description": "Backend для Гойуслуг",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
