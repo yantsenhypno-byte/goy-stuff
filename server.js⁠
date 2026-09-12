@@ -178,6 +178,6 @@ app.post('/api/request-payout', (req, res) => {
   res.json({ success: true, new_balance: user.balance_usd });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Сервер Гойуслуг запущен на порту ${PORT}`);
 });
