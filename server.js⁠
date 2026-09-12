@@ -17,7 +17,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '/')));
 
-// Добавлен allowed_updates — без него Telegram НЕ шлет события chat_member
 const bot = new TelegramBot(BOT_TOKEN, { 
   polling: {
     autoStart: false,
@@ -31,17 +30,20 @@ const bot = new TelegramBot(BOT_TOKEN, {
 async function startBotEngine() {
   try {
     await bot.deleteWebHook({ drop_pending_updates: true });
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     await bot.startPolling();
     console.log('Бот успешно подключен к Telegram контуру');
   } catch (err) {
-    console.error('Ошибка инициализации Telegram:', err.message);
+    console.error('Ошибка инициализации Telegram, повтор попытки через 5 сек...', err.message);
+    setTimeout(startBotEngine, 5000);
   }
 }
 
 bot.on('polling_error', (error) => {
-  if (error.code === 'ETELEGRAM' && error.message.includes('409 Conflict')) {
-    // Игнорируем временный конфликт перезапуска контейнеров на Railway
+  if (error.code === 'EFATAL' || error.message.includes('socket hang up')) {
+    console.warn('Обрыв связи с Telegram (socket hang up). Переподключаемся...');
+  } else if (error.code === 'ETELEGRAM' && error.message.includes('409 Conflict')) {
+    // Игнорируем конфликт перезапуска контейнеров на Railway
   } else {
     console.error('Ошибка polling:', error.message);
   }
@@ -68,7 +70,6 @@ function saveDB(data) {
   }
 }
 
-// Гарантированное получение или создание профиля пользователя
 function getOrCreateUser(db, tgId, username = 'User') {
   if (!db.users[tgId]) {
     db.users[tgId] = {
@@ -85,7 +86,7 @@ function getOrCreateUser(db, tgId, username = 'User') {
   return db.users[tgId];
 }
 
-// 1. Старт бота и надежная фиксация пригласившего
+// 1. Старт бота и фиксация пригласившего
 bot.onText(/\/start(?:\s+(.+))?/, (msg, match) => {
   const chatId = msg.chat.id;
   const tgId = msg.from.id;
@@ -99,7 +100,7 @@ bot.onText(/\/start(?:\s+(.+))?/, (msg, match) => {
     const parsedId = parseInt(startParam.replace('ref_', ''), 10);
     if (parsedId && parsedId !== tgId) {
       user.inviter_id = parsedId;
-      getOrCreateUser(db, parsedId); // Создаем реферера, если его еще не было в базе
+      getOrCreateUser(db, parsedId);
       console.log(`Пользователь ${tgId} прикреплен к рефереру ${parsedId}`);
     }
   }
@@ -112,7 +113,7 @@ bot.onText(/\/start(?:\s+(.+))?/, (msg, match) => {
   ).catch(() => {});
 });
 
-// 2. Логика начисления средств при подтверждении участника в группе
+// 2. Логика начисления средств при входе в группу
 bot.on('chat_member', (event) => {
   try {
     if (Number(event.chat.id) !== Number(GROUP_ID)) return;
@@ -128,7 +129,6 @@ bot.on('chat_member', (event) => {
       if (!user.is_active) {
         user.is_active = true;
 
-        // 1-й уровень (начисление 20$)
         const l1_id = user.inviter_id;
         if (l1_id && db.users[l1_id]) {
           db.users[l1_id].balance_usd += 20;
@@ -139,7 +139,6 @@ bot.on('chat_member', (event) => {
             `💰 Государственная выплата: Ваш реферал 1-го уровня оформил допуск!\nВам начислено: 20$\nТекущий баланс: ${db.users[l1_id].balance_usd}$`
           ).catch(() => {});
 
-          // 2-й уровень (начисление 2$)
           const l2_id = db.users[l1_id].inviter_id;
           if (l2_id && db.users[l2_id]) {
             db.users[l2_id].balance_usd += 2;
@@ -160,7 +159,7 @@ bot.on('chat_member', (event) => {
   }
 });
 
-// 3. Выдача реферальной ссылки и баланса (отдает данные мгновенно без блокировок)
+// 3. Выдача реферальной ссылки и баланса
 app.get('/api/partner-info', (req, res) => {
   const tgId = parseInt(req.query.tg_id, 10);
   if (!tgId) {
