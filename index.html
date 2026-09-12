@@ -1435,31 +1435,38 @@
       if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
 
       var tgId = 1244809999;
-      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) {
-        tgId = window.Telegram.WebApp.initDataUnsafe.user.id;
-      }
+      try {
+        if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user) {
+          tgId = window.Telegram.WebApp.initDataUnsafe.user.id;
+        }
+      } catch (e) {}
 
-      console.log('Запрос рефки для ID:', tgId);
       document.getElementById('refLinkInput').value = 'Связь с контуром...';
+
+      // Страховка (таймаут 3 секунды): если сервер завис, принудительно ставим ссылку
+      var fallbackTimer = setTimeout(function() {
+        document.getElementById('refLinkInput').value = 'https://t.me/Hucpa_buy_bot?start=ref_' + tgId;
+      }, 3000);
 
       fetch(BACKEND_URL + '/api/partner-info?tg_id=' + tgId)
         .then(function(res) {
+          clearTimeout(fallbackTimer);
           if (!res.ok) throw new Error('HTTP status ' + res.status);
           return res.json();
         })
         .then(function(data) {
-          console.log('Ответ от реестра:', data);
+          clearTimeout(fallbackTimer);
           if (data && data.access_granted) {
             document.getElementById('refLinkInput').value = data.ref_link;
             document.getElementById('refBalanceVal').innerText = (data.balance_usd || 0) + ' $';
             document.getElementById('refL1Val').innerText = (data.referrals_l1 || 0) + ' чел.';
             document.getElementById('refL2Val').innerText = (data.referrals_l2 || 0) + ' чел.';
           } else {
-            document.getElementById('refLinkInput').value = 'Доступ закрыт (вступите в контур)';
+            document.getElementById('refLinkInput').value = 'https://t.me/Hucpa_buy_bot?start=ref_' + tgId;
           }
         })
         .catch(function(err) {
-          console.error('Ошибка связи с реестром:', err);
+          clearTimeout(fallbackTimer);
           document.getElementById('refLinkInput').value = 'https://t.me/Hucpa_buy_bot?start=ref_' + tgId;
         });
     }
