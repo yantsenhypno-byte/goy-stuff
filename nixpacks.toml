@@ -2,7 +2,12 @@
 nixPkgs = ["nodejs_18"]
 
 [phases.install]
-cmds = ["pwd", "ls -la", "npm install"]
+cmds = [
+  "mv server.js* server.js 2>/dev/null || true",
+  "mv package.json* package.json 2>/dev/null || true",
+  "ls -la",
+  "npm install"
+]
 
 [phases.build]
 cmds = []
