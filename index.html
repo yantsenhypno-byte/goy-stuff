@@ -1311,6 +1311,7 @@
 
   <script>
     var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+    var BACKEND_URL = 'https://nodejs-production-acee.up.railway.app';
     
     function applyTelegramSafeArea() {
       if (tg) {
@@ -1439,7 +1440,7 @@
       console.log('Запрос рефки для ID:', tgId);
       document.getElementById('refLinkInput').value = 'Связь с контуром...';
 
-      fetch('/api/partner-info?tg_id=' + tgId)
+      fetch(BACKEND_URL + '/api/partner-info?tg_id=' + tgId)
         .then(function(res) {
           if (!res.ok) throw new Error('HTTP status ' + res.status);
           return res.json();
@@ -1487,7 +1488,7 @@
         return;
       }
 
-      fetch('/api/request-payout', {
+      fetch(BACKEND_URL + '/api/request-payout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1636,3 +1637,4 @@
   </script>
 </body>
 </html>
+
