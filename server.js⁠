@@ -159,8 +159,8 @@ bot.on('chat_member', (event) => {
   }
 });
 
-// 3. Выдача реферальной ссылки и баланса
-app.get('/api/partner-info', (req, res) => {
+// 3. Проверка партнерского статуса (выдает рефку ТОЛЬКО тем, кто в группе или админ)
+app.get('/api/partner-info', async (req, res) => {
   const tgId = parseInt(req.query.tg_id, 10);
   if (!tgId) {
     return res.status(400).json({ error: 'Missing tg_id' });
@@ -168,17 +168,56 @@ app.get('/api/partner-info', (req, res) => {
 
   const db = loadDB();
   const user = getOrCreateUser(db, tgId);
-  saveDB(db);
 
-  const refLink = `https://t.me/${BOT_USERNAME}?start=ref_${tgId}`;
+  // Админу доступ всегда разрешен без проверки API
+  if (tgId === ADMIN_ID || user.is_active) {
+    saveDB(db);
+    return res.json({
+      access_granted: true,
+      ref_link: `https://t.me/${BOT_USERNAME}?start=ref_${tgId}`,
+      balance_usd: user.balance_usd || 0,
+      referrals_l1: user.referrals_l1 || 0,
+      referrals_l2: user.referrals_l2 || 0
+    });
+  }
 
-  return res.json({
-    access_granted: true,
-    ref_link: refLink,
-    balance_usd: user.balance_usd || 0,
-    referrals_l1: user.referrals_l1 || 0,
-    referrals_l2: user.referrals_l2 || 0
-  });
+  try {
+    // Проверяем через Telegram API, реально ли юзер в группе/форуме
+    const member = await bot.getChatMember(GROUP_ID, tgId);
+    const hasAccess = ['member', 'administrator', 'creator'].includes(member.status);
+
+    if (hasAccess) {
+      user.is_active = true;
+      saveDB(db);
+      return res.json({
+        access_granted: true,
+        ref_link: `https://t.me/${BOT_USERNAME}?start=ref_${tgId}`,
+        balance_usd: user.balance_usd || 0,
+        referrals_l1: user.referrals_l1 || 0,
+        referrals_l2: user.referrals_l2 || 0
+      });
+    } else {
+      return res.json({
+        access_granted: false,
+        reason: 'Доступ в партнерский реестр закрыт. Требуется членство в закрытом контуре «Хуцпа».'
+      });
+    }
+  } catch (err) {
+    // Если бот не смог проверить (например, ошибка API), но это твой ID — пускаем, остальных нет
+    if (tgId === ADMIN_ID) {
+      return res.json({
+        access_granted: true,
+        ref_link: `https://t.me/${BOT_USERNAME}?start=ref_${tgId}`,
+        balance_usd: user.balance_usd || 0,
+        referrals_l1: user.referrals_l1 || 0,
+        referrals_l2: user.referrals_l2 || 0
+      });
+    }
+    return res.json({
+      access_granted: false,
+      reason: 'Доступ в партнерский реестр закрыт. Вы не состоите в контуре.'
+    });
+  }
 });
 
 // 4. Подача заявки на вывод
@@ -197,7 +236,7 @@ app.post('/api/request-payout', (req, res) => {
   }
 
   user.balance_usd -= parsedAmount;
-  if (!user.payout_history) user.payout_history = [];
+  if (!user.payout_history) user.payout_history = []
   user.payout_history.push({
     amount: parsedAmount,
     requisites,
